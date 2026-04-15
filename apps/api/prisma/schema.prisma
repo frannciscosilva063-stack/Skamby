@@ -1,0 +1,255 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum ProductCondition {
+  NOVO
+  BOM
+  USADO
+  PRECISA_REPAROS
+}
+
+enum ProductStatus {
+  ACTIVE
+  SOLD
+  ARCHIVED
+}
+
+enum PlanCode {
+  FREE
+  BASIC
+  MEDIUM
+  PRO
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRED
+  CANCELED
+  PENDING
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+model User {
+  id                String           @id @default(cuid())
+  email             String           @unique
+  passwordHash      String
+  role              Role             @default(USER)
+  mfaEnabled        Boolean          @default(false)
+  mfaSecret         String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  profilePublic     ProfilePublic?
+  profilePrivate    ProfilePrivate?
+  products          Product[]
+  favorites         Favorite[]
+  conversations     Conversation[]   @relation("ConversationOwner")
+  messages          Message[]
+  subscriptions     Subscription[]
+  quotas            PostingQuota[]
+  refreshTokens     RefreshToken[]
+  auditLogs         AuditLog[]
+}
+
+model ProfilePublic {
+  id               String   @id @default(cuid())
+  userId           String   @unique
+  displayName      String
+  city             String?
+  state            String?
+  bio              String?
+  reputationScore  Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ProfilePrivate {
+  id               String   @id @default(cuid())
+  userId           String   @unique
+  phone            String?
+  cpfMasked        String?
+  consentedAt      DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Product {
+  id               String           @id @default(cuid())
+  ownerId          String
+  title            String
+  description      String
+  priceCents       Int
+  condition        ProductCondition
+  category         String
+  state            String
+  city             String
+  status           ProductStatus    @default(ACTIVE)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  owner            User             @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  images           ProductImage[]
+  favorites        Favorite[]
+
+  @@index([category, condition, state, city, createdAt])
+}
+
+model ProductImage {
+  id               String   @id @default(cuid())
+  productId        String
+  url              String
+  publicId         String
+  position         Int      @default(0)
+  createdAt        DateTime @default(now())
+  product          Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model Favorite {
+  id               String   @id @default(cuid())
+  userId           String
+  productId        String
+  createdAt        DateTime @default(now())
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product          Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId])
+}
+
+model Plan {
+  id               String   @id @default(cuid())
+  code             PlanCode @unique
+  name             String
+  maxPosts         Int
+  priceCents       Int
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  subscriptions    Subscription[]
+}
+
+model Subscription {
+  id               String             @id @default(cuid())
+  userId           String
+  planId           String
+  status           SubscriptionStatus @default(PENDING)
+  startsAt         DateTime?
+  endsAt           DateTime?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan             Plan               @relation(fields: [planId], references: [id], onDelete: Restrict)
+  payments         Payment[]
+}
+
+model PostingQuota {
+  id               String   @id @default(cuid())
+  userId           String
+  allowedPosts     Int      @default(3)
+  usedPosts        Int      @default(0)
+  source           String   @default("FREE")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Payment {
+  id               String        @id @default(cuid())
+  subscriptionId   String
+  provider         String
+  providerRef      String?       @unique
+  amountCents      Int
+  status           PaymentStatus @default(PENDING)
+  paidAt           DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  subscription     Subscription  @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+}
+
+model WebhookEvent {
+  id               String   @id @default(cuid())
+  provider         String
+  externalId       String
+  eventType        String
+  payload          Json
+  processedAt      DateTime?
+  createdAt        DateTime @default(now())
+
+  @@unique([provider, externalId])
+}
+
+model Conversation {
+  id               String                     @id @default(cuid())
+  ownerId          String
+  createdAt        DateTime                   @default(now())
+  updatedAt        DateTime                   @updatedAt
+  owner            User                       @relation("ConversationOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  participants     ConversationParticipant[]
+  messages         Message[]
+}
+
+model ConversationParticipant {
+  id               String       @id @default(cuid())
+  conversationId   String
+  userId           String
+  createdAt        DateTime     @default(now())
+  conversation     Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+}
+
+model Message {
+  id               String       @id @default(cuid())
+  conversationId   String
+  senderId         String
+  body             String
+  createdAt        DateTime     @default(now())
+  conversation     Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender           User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+}
+
+model RefreshToken {
+  id               String   @id @default(cuid())
+  userId           String
+  tokenHash        String
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime @default(now())
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model AuditLog {
+  id               String   @id @default(cuid())
+  userId           String?
+  action           String
+  targetType       String
+  targetId         String?
+  metadata         Json?
+  ip               String?
+  createdAt        DateTime @default(now())
+  user             User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([action, createdAt])
+}
